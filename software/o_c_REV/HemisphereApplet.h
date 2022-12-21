@@ -300,6 +300,16 @@ public:
         gfxLine(0, 12, 62, 12);
     }
 
+    void gfxTabs(int available_tabs, int current_tab) {
+        int padding = 64 / available_tabs;
+        for(int i = 0; i < available_tabs; i++) {
+            gfxPrint(i * padding + (padding / 2) - 4, 13, i + 1);
+            if (i == current_tab) {
+                gfxLine(i * padding, 20, (i * padding) + (padding - 2), 20);
+            }
+        }
+    }
+
     //////////////// Offset I/O methods
     ////////////////////////////////////////////////////////////////////////////////
     int In(int ch) {

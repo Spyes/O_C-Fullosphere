@@ -31,27 +31,29 @@ public:
     void Start() {
         signal = 0;
         phase = 0;
-        attack = 50;
-        decay = 50;
+        for(int i = 0; i < available_tabs; i++) {
+            attack[i] = 50 * i;
+            decay[i] = 50 - (i * 10);
+        }
     }
 
     void Controller() {
         if (Clock(0)) {
             // Trigger the envelope
             phase = 1; // Return to attack phase
-            effective_attack = attack;
-            effective_decay = decay;
+            effective_attack = attack[current_tab];
+            effective_decay = decay[current_tab];
         } else if (Clock(1)) {
             // Trigger the envelope in reverse
             phase = 1;
-            effective_attack = decay;
-            effective_decay = attack;
+            effective_attack = decay[current_tab];
+            effective_decay = attack[current_tab];
         }
 
         if (phase > 0) {
             simfloat target;
-            if (phase == 1) target = int2simfloat(HEMISPHERE_MAX_CV); // Rise to max for attack
-            if (phase == 2) target = 0; // Fall to zero for decay
+            if (phase == 1) target = int2simfloat(HEMISPHERE_MAX_CV); // Rise to max for attack[current_tab]
+            if (phase == 2) target = 0; // Fall to zero for decay[current_tab]
 
             if (signal != target) {
                 int segment = phase == 1
@@ -89,35 +91,37 @@ public:
 
     void View() {
         gfxHeader(applet_name());
+        gfxTabs(available_tabs, current_tab);
         DrawIndicator();
     }
 
     void OnButtonPress() {
-        cursor = 1 - cursor;
+        // cursor = 1 - cursor;
+        if (++current_tab == available_tabs) current_tab = 0;
     }
 
     void OnEncoderMove(int direction) {
         if (cursor == 0) {
-            attack = constrain(attack += direction, 0, HEM_ADEG_MAX_VALUE);
-            last_ms_value = Proportion(attack, HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+            attack[current_tab] = constrain(attack[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
+            last_ms_value = Proportion(attack[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
         }
         else {
-            decay = constrain(decay += direction, 0, HEM_ADEG_MAX_VALUE);
-            last_ms_value = Proportion(decay, HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+            decay[current_tab] = constrain(decay[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
+            last_ms_value = Proportion(decay[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
         }
         last_change_ticks = OC::CORE::ticks;
     }
         
     uint32_t OnDataRequest() {
         uint32_t data = 0;
-        Pack(data, PackLocation {0,8}, attack);
-        Pack(data, PackLocation {8,8}, decay);
+        Pack(data, PackLocation {0,8}, attack[current_tab]);
+        Pack(data, PackLocation {8,8}, decay[current_tab]);
         return data;
     }
 
     void OnDataReceive(uint32_t data) {
-        attack = Unpack(data, PackLocation {0,8});
-        decay = Unpack(data, PackLocation {8,8});
+        attack[current_tab] = Unpack(data, PackLocation {0,8});
+        decay[current_tab] = Unpack(data, PackLocation {8,8});
     }
 
 protected:
@@ -131,6 +135,10 @@ protected:
     }
     
 private:
+    // Tabs
+    int available_tabs = 4;
+    int current_tab = 0;
+
     simfloat signal; // Current signal level for each channel
     int phase; // 0=Not running 1=Attack 2=Decay
     int cursor; // 0 = Attack, 1 = Decay
@@ -140,12 +148,12 @@ private:
     int effective_decay;  // of the EG, so that it can be triggered in reverse!
 
     // Settings
-    int attack; // Time to reach signal level if signal < 5V
-    int decay; // Time to reach signal level if signal > 0V
+    int *attack = new int(available_tabs); // Time to reach signal level if signal < 5V
+    int *decay = new int(available_tabs); // Time to reach signal level if signal > 0V
 
     void DrawIndicator() {
-        int a_x = Proportion(attack, HEM_ADEG_MAX_VALUE, 31);
-        int d_x = a_x + Proportion(decay, HEM_ADEG_MAX_VALUE, 31);
+        int a_x = Proportion(attack[current_tab], HEM_ADEG_MAX_VALUE, 31);
+        int d_x = a_x + Proportion(decay[current_tab], HEM_ADEG_MAX_VALUE, 31);
 
         if (d_x > 0) { // Stretch to use the whole viewport
             a_x = Proportion(62, d_x, a_x);

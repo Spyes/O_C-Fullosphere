@@ -29,7 +29,7 @@
 /* ------------ uncomment for use with Plum Audio VOR anabled versions (OCP, 1uO_c v2, 4Robots) ---------------------------------------------------------  */
 #define VOR
 /* ------------ uncomment for use with Plum Audio 1uO_c 4Robots (To use Up button long press to change VOR instead activate screensaver) ----------------  */
-#define VOR_NO_RANGE_BUTTON
+//#define VOR_NO_RANGE_BUTTON
 
 #if defined(VOR)
   #define IO_10V

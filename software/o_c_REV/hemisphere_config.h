@@ -44,7 +44,6 @@
     DECLARE_APPLET( 27, 0x20, hMIDIOut), \
     DECLARE_APPLET( 33, 0x10, MixerBal), \
     DECLARE_APPLET( 20, 0x02, Palimpsest), \
-    DECLARE_APPLET( 44, 0x01, RunglBook), \
     DECLARE_APPLET( 26, 0x08, ScaleDuet), \
     DECLARE_APPLET( 40, 0x40, Schmitt), \
     DECLARE_APPLET( 23, 0x80, Scope), \
@@ -59,7 +58,6 @@
     DECLARE_APPLET( 13, 0x40, TLNeuron), \
     DECLARE_APPLET( 37, 0x40, Trending), \
     DECLARE_APPLET( 11, 0x06, TrigSeq), \
-    DECLARE_APPLET( 25, 0x06, TrigSeq16), \
     DECLARE_APPLET( 39, 0x80, Tuner), \
     DECLARE_APPLET( 52, 0x01, VectorEG), \
     DECLARE_APPLET( 49, 0x01, VectorLFO), \
