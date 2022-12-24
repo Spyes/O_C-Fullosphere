@@ -16,12 +16,11 @@
 //////////////////  id  cat   class name
 #define HEMISPHERE_APPLETS { \
     DECLARE_APPLET(  8, 0x01, ADSREG), \
-    DECLARE_APPLET( 34, 0x01, ADEG), \
+    DECLARE_FULL_APPLET( 34, 0x01, ADEG), \
     DECLARE_APPLET( 15, 0x02, AnnularFusion), \
     DECLARE_APPLET( 47, 0x09, ASR), \
     DECLARE_APPLET( 56, 0x10, AttenuateOffset), \
     DECLARE_APPLET( 41, 0x41, Binary), \
-    DECLARE_APPLET( 51, 0x80, BootsNCat), \
     DECLARE_APPLET(  4, 0x14, Brancher), \
     DECLARE_APPLET( 31, 0x04, Burst), \
     DECLARE_APPLET( 12, 0x10, Calculate),\
@@ -39,7 +38,6 @@
     DECLARE_APPLET( 16, 0x80, LoFiPCM), \
     DECLARE_APPLET( 10, 0x44, Logic), \
     DECLARE_APPLET( 21, 0x01, LowerRenz), \
-    DECLARE_APPLET( 50, 0x04, Metronome), \
     DECLARE_APPLET(150, 0x20, hMIDIIn), \
     DECLARE_APPLET( 27, 0x20, hMIDIOut), \
     DECLARE_APPLET( 33, 0x10, MixerBal), \

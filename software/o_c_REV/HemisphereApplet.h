@@ -30,6 +30,10 @@
 
 #define LEFT_HEMISPHERE 0
 #define RIGHT_HEMISPHERE 1
+#define LEFT_BUTTON 0
+#define RIGHT_BUTTON 1
+#define LEFT_ENCODER LEFT_BUTTON
+#define RIGHT_ENCODER RIGHT_BUTTON
 #ifdef BUCHLA_4U
 #define HEMISPHERE_MAX_CV 15360
 #define HEMISPHERE_CENTER_CV 7680
@@ -80,10 +84,11 @@ public:
     virtual void Controller();
     virtual void View();
 
-    void BaseStart(bool hemisphere_) {
+    void BaseStart(bool hemisphere_, int _max_tabs = 0) {
         hemisphere = hemisphere_;
         gfx_offset = hemisphere * 64;
         io_offset = hemisphere * 2;
+        max_tabs = _max_tabs;
 
         // Initialize some things for startup
         ForEachChannel(ch)
@@ -148,6 +153,12 @@ public:
     // Screensavers are deprecated in favor of screen blanking, but the BaseScreensaverView() remains
     // to avoid breaking applets based on the old boilerplate
     void BaseScreensaverView() {}
+
+    void BaseRightButtonPress() {
+        if (max_tabs > 0) {
+            if (++current_tab == max_tabs) current_tab = 0;
+        }
+    }
 
     /* Help Screen Toggle */
     void HelpScreen() {
@@ -295,13 +306,12 @@ public:
     }
 
     void gfxHeader(const char *str) {
-        gfxPrint(1, 2, str);
-        gfxLine(0, 10, 62, 10);
-        gfxLine(0, 12, 62, 12);
+        gfxPrint(64 - (strlen(str) * 2), 2, str);
+        gfxLine(0, 10, 127, 10);
     }
 
     void gfxTabs(int available_tabs, int current_tab) {
-        int padding = 64 / available_tabs;
+        int padding = 128 / available_tabs;
         for(int i = 0; i < available_tabs; i++) {
             gfxPrint(i * padding + (padding / 2) - 4, 13, i + 1);
             if (i == current_tab) {
@@ -356,6 +366,27 @@ public:
         return clocked;
     }
 
+    bool FClock(int ch, bool physical = 0) {
+        bool clocked = 0;
+        if (ch == 0) clocked = OC::DigitalInputs::clocked<OC::DIGITAL_INPUT_1>();
+        if (ch == 1) clocked = OC::DigitalInputs::clocked<OC::DIGITAL_INPUT_2>();
+        if (ch == 2) clocked = OC::DigitalInputs::clocked<OC::DIGITAL_INPUT_3>();
+        if (ch == 3) clocked = OC::DigitalInputs::clocked<OC::DIGITAL_INPUT_4>();
+
+        if (ch == 0 && !physical) {
+            ClockManager *clock_m = clock_m->get();
+            if (clock_m->IsRunning()) clocked = clock_m->Tock();
+            else if (master_clock_bus) clocked = OC::DigitalInputs::clocked<OC::DIGITAL_INPUT_1>();
+        }
+
+        if (clocked) {
+        		cycle_ticks[ch] = OC::CORE::ticks - last_clock[ch];
+        		last_clock[ch] = OC::CORE::ticks;
+        }
+        return clocked;
+    }
+
+
     void ClockOut(int ch, int ticks = HEMISPHERE_CLOCK_TICKS) {
         clock_countdown[ch] = ticks;
         Out(ch, 0, PULSE_VOLTAGE);
@@ -388,6 +419,8 @@ protected:
     bool hemisphere; // Which hemisphere (0, 1) this applet uses
     const char* help[4];
     virtual void SetHelp();
+    int current_tab;
+    int max_tabs;
 
     /* Forces applet's Start() method to run the next time the applet is selected. This
      * allows an applet to start up the same way every time, regardless of previous state.

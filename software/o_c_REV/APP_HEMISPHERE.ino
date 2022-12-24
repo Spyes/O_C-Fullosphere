@@ -37,6 +37,13 @@ namespace menu = OC::menu;
   class_name ## _OnDataRequest, class_name ## _OnDataReceive \
 }
 
+#define DECLARE_FULL_APPLET(id, categories, class_name) \
+{ id, categories, class_name ## _Start, class_name ## _Controller, class_name ## _View, \
+  class_name ## _OnButtonPress, class_name ## _OnEncoderMove, class_name ## _ToggleHelpScreen, \
+  class_name ## _OnDataRequest, class_name ## _OnDataReceive, class_name ## _OnRightButtonPress \
+}
+
+
 #define HEMISPHERE_DOUBLE_CLICK_TIME 8000
 
 typedef struct Applet {
@@ -50,6 +57,7 @@ typedef struct Applet {
   void (*ToggleHelpScreen)(bool); // Help Screen has been requested
   uint32_t (*OnDataRequest)(bool); // Get a data int from the applet
   void (*OnDataReceive)(bool, uint32_t); // Send a data int to the applet
+  void (*OnRightButtonPress)();
 } Applet;
 
 // The settings specify the selected applets, and 32 bits of data for each applet
@@ -71,7 +79,7 @@ class HemisphereManager : public SystemExclusiveHandler,
     public settings::SettingsBase<HemisphereManager, HEMISPHERE_SETTING_LAST> {
 public:
     void Init() {
-        select_mode = -1; // Not selecting
+        select_mode = false;
         midi_in_hemisphere = -1; // No MIDI In
         Applet applets[] = HEMISPHERE_APPLETS;
         memcpy(&available_applets, &applets, sizeof(applets));
@@ -81,17 +89,13 @@ public:
         clock_setup = 0;
 
         SetApplet(0, get_applet_index_by_id(8)); // ADSR
-        SetApplet(1, get_applet_index_by_id(26)); // Scale Duet
     }
 
     void Resume() {
-        for (int h = 0; h < 2; h++)
-        {
-            int index = get_applet_index_by_id(values_[h]);
-            SetApplet(h, index);
-            uint32_t data = (values_[4 + h] << 16) + values_[2 + h];
-            available_applets[index].OnDataReceive(h, data);
-        }
+        int index = get_applet_index_by_id(values_[0]);
+        SetApplet(0, index);
+        uint32_t data = (values_[4] << 16) + values_[2];
+        available_applets[index].OnDataReceive(0, data);
     }
 
     void SetApplet(int hemisphere, int index) {
@@ -104,13 +108,13 @@ public:
 
     void ChangeApplet(int dir) {
         if (SelectModeEnabled() and help_hemisphere == -1) {
-            int index = get_next_applet_index(my_applet[select_mode], dir);
-            SetApplet(select_mode, index);
+            int index = get_next_applet_index(my_applet[0], dir);
+            SetApplet(0, index);
         }
     }
 
     bool SelectModeEnabled() {
-        return select_mode > -1;
+        return select_mode;
     }
 
     void ExecuteControllers() {
@@ -126,11 +130,8 @@ public:
 
         if (clock_setup) ClockSetup.Controller(LEFT_HEMISPHERE, clock_m->IsForwarded());
 
-        for (int h = 0; h < 2; h++)
-        {
-            int index = my_applet[h];
-            available_applets[index].Controller(h, clock_m->IsForwarded());
-        }
+        int index = my_applet[0];
+        available_applets[index].Controller(0, clock_m->IsForwarded());
     }
 
     void DrawViews() {
@@ -140,46 +141,53 @@ public:
             int index = my_applet[help_hemisphere];
             available_applets[index].View(help_hemisphere);
         } else {
-            for (int h = 0; h < 2; h++)
-            {
-                int index = my_applet[h];
-                available_applets[index].View(h);
-                if (h == 0) {
-                    if (clock_m->IsRunning() || clock_m->IsPaused()) {
-                        // Metronome icon
-                        graphics.drawBitmap8(56, 1, 8, clock_m->Cycle() ? METRO_L_ICON : METRO_R_ICON);
-                    } else if (clock_m->IsForwarded()) {
-                        // CV Forwarding Icon
-                        graphics.drawBitmap8(56, 1, 8, CLOCK_ICON);
-                    }
-                }
+            int index = my_applet[0];
+            available_applets[index].View(0);
+            if (clock_m->IsRunning() || clock_m->IsPaused()) {
+                // Metronome icon
+                graphics.drawBitmap8(56, 1, 8, clock_m->Cycle() ? METRO_L_ICON : METRO_R_ICON);
+            } else if (clock_m->IsForwarded()) {
+                // CV Forwarding Icon
+                graphics.drawBitmap8(56, 1, 8, CLOCK_ICON);
             }
-
-            if (select_mode == LEFT_HEMISPHERE) graphics.drawFrame(0, 0, 64, 64);
-            if (select_mode == RIGHT_HEMISPHERE) graphics.drawFrame(64, 0, 64, 64);
+            if (select_mode) graphics.drawFrame(0, 0, 128, 64);
         }
     }
 
     void DelegateEncoderPush(const UI::Event &event) {
-        int h = (event.control == OC::CONTROL_BUTTON_L) ? LEFT_HEMISPHERE : RIGHT_HEMISPHERE;
+        if (help_hemisphere > -1) return;
+        int button = (event.control == OC::CONTROL_BUTTON_L) ? LEFT_BUTTON : RIGHT_BUTTON;
         if (clock_setup) {
             ClockSetup.OnButtonPress(LEFT_HEMISPHERE);
-        } else if (select_mode == h) {
-            select_mode = -1; // Pushing a button for the selected side turns off select mode
+        } else if (select_mode) {
+            select_mode = false; // Pushing a button for the selected side turns off select mode
         } else {
-            int index = my_applet[h];
+            int index = my_applet[0];
             if (event.type == UI::EVENT_BUTTON_PRESS) {
-                available_applets[index].OnButtonPress(h);
+                available_applets[index].OnButtonPress(button);
             }
         }
     }
 
-    void DelegateSelectButtonPush(int hemisphere) {
+    void DelegateEncoderMovement(const UI::Event &event) {
+        if (help_hemisphere > -1) return;
+        int encoder = (event.control == OC::CONTROL_ENCODER_L) ? LEFT_ENCODER : RIGHT_ENCODER;
+        if (clock_setup) {
+            ClockSetup.OnEncoderMove(LEFT_HEMISPHERE, event.value);
+        } else if (select_mode) {
+            ChangeApplet(event.value);
+        } else {
+            int index = my_applet[0];
+            available_applets[index].OnEncoderMove(encoder, event.value);
+        }
+    }
+
+    void DelegateLeftButtonPush(int hemisphere) {
         if (OC::CORE::ticks - click_tick < HEMISPHERE_DOUBLE_CLICK_TIME && hemisphere == first_click) {
             // This is a double-click, so activate corresponding help screen, leave
             // Select Mode, and reset the double-click timer
             SetHelpScreen(hemisphere);
-            select_mode = -1;
+            select_mode = false;
             click_tick = 0;
         } else {
             // This is a single click. If a help screen is already selected, and the
@@ -189,8 +197,8 @@ public:
                 else SetHelpScreen(-1); // Leave help screen if corresponding button is clicked
             } else if (!clock_setup) {
                 // If we're in the clock setup screen, we want to exit the setup without turning on Select Mode
-                if (hemisphere == select_mode) select_mode = -1; // Leave Select Mode is same button is pressed
-                else select_mode = hemisphere; // Otherwise, set Select Mode
+                if (select_mode) select_mode = false; // Leave Select Mode is same button is pressed
+                else select_mode = true; // Otherwise, set Select Mode
                 click_tick = OC::CORE::ticks;
             }
             first_click = hemisphere;
@@ -199,15 +207,13 @@ public:
         clock_setup = 0; // Turn off clock setup with any button press
     }
 
-    void DelegateEncoderMovement(const UI::Event &event) {
-        int h = (event.control == OC::CONTROL_ENCODER_L) ? LEFT_HEMISPHERE : RIGHT_HEMISPHERE;
+    void DelegateRightButtonPush() {
+        if (help_hemisphere > -1) return;
         if (clock_setup) {
-            ClockSetup.OnEncoderMove(LEFT_HEMISPHERE, event.value);
-        } else if (select_mode == h) {
-            ChangeApplet(event.value);
+            clock_setup = 0;
         } else {
-            int index = my_applet[h];
-            available_applets[index].OnEncoderMove(h, event.value);
+            int index = my_applet[0];
+            available_applets[index].OnRightButtonPress();
         }
     }
 
@@ -236,7 +242,7 @@ public:
     }
 
     void RequestAppletData() {
-        for (int h = 0; h < 2; h++)
+        for (int h = 0; h < 1; h++)
         {
             int index = my_applet[h];
             uint32_t data = available_applets[index].OnDataRequest(h);
@@ -286,7 +292,7 @@ private:
     Applet available_applets[HEMISPHERE_AVAILABLE_APPLETS];
     Applet ClockSetup;
     int my_applet[2]; // Indexes to available_applets
-    int select_mode;
+    bool select_mode;
     bool clock_setup;
     int help_hemisphere; // Which of the hemispheres (if any) is in help mode, or -1 if none
     int midi_in_hemisphere; // Which of the hemispheres (if any) is using MIDI In
@@ -383,12 +389,12 @@ void HEMISPHERE_screensaver() {} // Deprecated in favor of screen blanking
 
 void HEMISPHERE_handleButtonEvent(const UI::Event &event) {
     if (event.type == UI::EVENT_BUTTON_PRESS) {
-        if (event.control == OC::CONTROL_BUTTON_UP || event.control == OC::CONTROL_BUTTON_DOWN) {
-            int hemisphere = (event.control == OC::CONTROL_BUTTON_UP) ? LEFT_HEMISPHERE : RIGHT_HEMISPHERE;
-            manager.DelegateSelectButtonPush(hemisphere);
-        } else {
+        if (event.control == OC::CONTROL_BUTTON_UP)
+            manager.DelegateLeftButtonPush(0);
+        else if (event.control == OC::CONTROL_BUTTON_DOWN)
+            manager.DelegateRightButtonPush();
+        else
             manager.DelegateEncoderPush(event);
-        }
     }
 
     if (event.type == UI::EVENT_BUTTON_LONG_PRESS) {

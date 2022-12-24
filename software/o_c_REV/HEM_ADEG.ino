@@ -20,6 +20,12 @@
 
 #define HEM_ADEG_MAX_VALUE 255
 #define HEM_ADEG_MAX_TICKS 33333
+#define HEM_ADEG_AVAILABLE_TABS 4
+#define HEM_ADEG_MAX_OPS 2
+#define HEM_ADEG_OPT_DIRECTION 0
+#define HEM_ADEG_OPT_MOD_IN 1
+#define HEM_ADEG_SETTINGS_PAGES 2
+#define HEM_ADEG_SETTINGS_PER_PAGE 2
 
 class ADEG : public HemisphereApplet {
 public:
@@ -29,38 +35,45 @@ public:
     }
 
     void Start() {
-        signal = 0;
-        phase = 0;
-        for(int i = 0; i < available_tabs; i++) {
+        for(int i = 0; i < HEM_ADEG_AVAILABLE_TABS; i++) {
+            signal[i] = 0;
+            phase[i] = 0;
             attack[i] = 50 * i;
             decay[i] = 50 - (i * 10);
+            operation[i] = 0;
+            mod_dest[i] = 0;
+            current_settings_page[i] = 0;
+            opt_cursor[i] = 0;
         }
     }
 
     void Controller() {
-        if (Clock(0)) {
-            // Trigger the envelope
-            phase = 1; // Return to attack phase
-            effective_attack = attack[current_tab];
-            effective_decay = decay[current_tab];
-        } else if (Clock(1)) {
-            // Trigger the envelope in reverse
-            phase = 1;
-            effective_attack = decay[current_tab];
-            effective_decay = attack[current_tab];
-        }
+        for(int i = 0; i < HEM_ADEG_AVAILABLE_TABS; i++) {
+            if (FClock(i)) {
+                phase[i] = 1;
+                if (operation[i]) { // reverse
+                    effective_attack[i] = decay[i];
+                    effective_decay[i] = attack[i];
+                } else {
+                    effective_attack[i] = attack[i];
+                    effective_decay[i] = decay[i];
+                }
+            }
 
-        if (phase > 0) {
-            simfloat target;
-            if (phase == 1) target = int2simfloat(HEMISPHERE_MAX_CV); // Rise to max for attack[current_tab]
-            if (phase == 2) target = 0; // Fall to zero for decay[current_tab]
-
-            if (signal != target) {
-                int segment = phase == 1
-                    ? effective_attack + Proportion(DetentedIn(0), HEMISPHERE_MAX_CV, HEM_ADEG_MAX_VALUE)
-                    : effective_decay + Proportion(DetentedIn(1), HEMISPHERE_MAX_CV, HEM_ADEG_MAX_VALUE);
+            if (phase[i] > 0) {
+                simfloat target = phase[i] == 1 ? int2simfloat(HEMISPHERE_MAX_CV) : 0;
+                int attack_cv = 0, decay_cv = 0;
+                if(mod_dest[i] == DEST_ATTACK || mod_dest[i] == DEST_BOTH) {
+                    attack_cv = Proportion(DetentedIn(i), HEMISPHERE_MAX_CV, HEM_ADEG_MAX_VALUE);
+                }
+                if (mod_dest[i] == DEST_DECAY || mod_dest[i] == DEST_BOTH) {
+                    decay_cv = Proportion(DetentedIn(i), HEMISPHERE_MAX_CV, HEM_ADEG_MAX_VALUE);
+                }
+                 int segment = phase[i] == 1
+                    ? effective_attack[i] + attack_cv
+                    : effective_decay[i] + decay_cv;
                 segment = constrain(segment, 0, HEM_ADEG_MAX_VALUE);
-                simfloat remaining = target - signal;
+                simfloat remaining = target - signal[i];
 
                 // The number of ticks it would take to get from 0 to HEMISPHERE_MAX_CV
                 int max_change = Proportion(segment, HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS);
@@ -75,41 +88,70 @@ public:
                 } else {
                     delta = remaining / ticks_to_remaining;
                 }
-                signal += delta;
+                signal[i] += delta;
 
-                if (simfloat2int(signal) >= HEMISPHERE_MAX_CV && phase == 1) phase = 2;
+                // we've reached the max on Attack, switch to Decay
+                if (simfloat2int(signal[i]) >= HEMISPHERE_MAX_CV && phase[i] == 1) phase[i] = 2;
 
                 // Check for EOC
-                if (simfloat2int(signal) <= 0 && phase == 2) {
-                    ClockOut(1);
-                    phase = 0;
+                if (simfloat2int(signal[i]) <= 0 && phase[i] == 2) {
+                    // ClockOut(i);
+                    phase[i] = 0;
                 }
+                Out(i, simfloat2int(signal[i]));
             }
-            Out(0, simfloat2int(signal));
         }
     }
 
     void View() {
         gfxHeader(applet_name());
-        gfxTabs(available_tabs, current_tab);
+        gfxTabs(HEM_ADEG_AVAILABLE_TABS, current_tab);
         DrawIndicator();
+        DrawSettings();
     }
 
-    void OnButtonPress() {
-        // cursor = 1 - cursor;
-        if (++current_tab == available_tabs) current_tab = 0;
+    void OnButtonPress(int button) {
+        if (button == LEFT_ENCODER) {
+                cursor = 1 - cursor;
+        } else {
+            opt_cursor[current_tab] += 1;
+            if (opt_cursor[current_tab] == HEM_ADEG_SETTINGS_PER_PAGE) {
+                current_settings_page[current_tab] += 1;
+                if (current_settings_page[current_tab] == HEM_ADEG_SETTINGS_PAGES) {
+                    current_settings_page[current_tab] = 0;
+                }
+                opt_cursor[current_tab] = 0;
+            }
+        }
     }
 
-    void OnEncoderMove(int direction) {
-        if (cursor == 0) {
-            attack[current_tab] = constrain(attack[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
-            last_ms_value = Proportion(attack[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+    void OnTabSwitch() {}
+
+    void OnEncoderMove(int encoder, int direction) {
+        if (encoder == LEFT_ENCODER) {
+            if (cursor == 0) {
+                attack[current_tab] = constrain(attack[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
+                last_ms_value = Proportion(attack[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+            }
+            else {
+                decay[current_tab] = constrain(decay[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
+                last_ms_value = Proportion(decay[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+            }
+            last_change_ticks = OC::CORE::ticks;
         }
         else {
-            decay[current_tab] = constrain(decay[current_tab] += direction, 0, HEM_ADEG_MAX_VALUE);
-            last_ms_value = Proportion(decay[current_tab], HEM_ADEG_MAX_VALUE, HEM_ADEG_MAX_TICKS) / 17;
+            if (current_settings_page[current_tab] == 0) {
+                if (opt_cursor[current_tab] == HEM_ADEG_OPT_DIRECTION) {
+                    operation[current_tab] += direction;
+                    if (operation[current_tab] == HEM_ADEG_MAX_OPS) operation[current_tab] = 0;
+                    if (operation[current_tab] < 0) operation[current_tab] = HEM_ADEG_MAX_OPS - 1;
+                } else {
+                    mod_dest[current_tab] += direction;
+                    if (mod_dest[current_tab] == MOD_DEST_LAST) mod_dest[current_tab] = 0;
+                    if (mod_dest[current_tab] < 0) mod_dest[current_tab] = MOD_DEST_LAST - 1;
+                }
+            }
         }
-        last_change_ticks = OC::CORE::ticks;
     }
         
     uint32_t OnDataRequest() {
@@ -135,21 +177,36 @@ protected:
     }
     
 private:
-    // Tabs
-    int available_tabs = 4;
-    int current_tab = 0;
+    enum MOD_DESTS {
+        DEST_NONE,
+        DEST_ATTACK,
+        DEST_DECAY,
+        DEST_BOTH,
+        MOD_DEST_LAST
+    };
 
-    simfloat signal; // Current signal level for each channel
-    int phase; // 0=Not running 1=Attack 2=Decay
+    // Tabs
+    int *settings_pages = new int(HEM_ADEG_SETTINGS_PAGES);
+    int *current_settings_page = new int(HEM_ADEG_AVAILABLE_TABS);
+
+    const char *op_names[HEM_ADEG_MAX_OPS] = {"Trigger", "Reverse"};
+    int *operation = new int(HEM_ADEG_AVAILABLE_TABS);
+
+    const char *mod_dest_names[MOD_DEST_LAST] = {"None", "Attack", "Decay", "Both"};
+    int *mod_dest = new int(HEM_ADEG_AVAILABLE_TABS);
+
     int cursor; // 0 = Attack, 1 = Decay
+    int *opt_cursor = new int(HEM_ADEG_AVAILABLE_TABS);
     int last_ms_value;
     int last_change_ticks;
-    int effective_attack; // Attack and decay for this particular triggering
-    int effective_decay;  // of the EG, so that it can be triggered in reverse!
+    simfloat *signal = new simfloat(HEM_ADEG_AVAILABLE_TABS); // Current signal level for each channel
+    int *phase = new int(HEM_ADEG_AVAILABLE_TABS); // 0=Not running 1=Attack 2=Decay
+    int *effective_attack = new int(HEM_ADEG_AVAILABLE_TABS); // Attack and decay for this particular triggering
+    int *effective_decay = new int(HEM_ADEG_AVAILABLE_TABS);  // of the EG, so that it can be triggered in reverse!
 
     // Settings
-    int *attack = new int(available_tabs); // Time to reach signal level if signal < 5V
-    int *decay = new int(available_tabs); // Time to reach signal level if signal > 0V
+    int *attack = new int(HEM_ADEG_AVAILABLE_TABS); // Time to reach signal level if signal < 5V
+    int *decay = new int(HEM_ADEG_AVAILABLE_TABS); // Time to reach signal level if signal > 0V
 
     void DrawIndicator() {
         int a_x = Proportion(attack[current_tab], HEM_ADEG_MAX_VALUE, 31);
@@ -164,13 +221,32 @@ private:
         gfxLine(a_x, 33, d_x, 62, cursor == 0);
 
         // Output indicators
-        gfxRect(1, 15, ProportionCV(ViewOut(0), 62), 6);
+        gfxRect(1, 23, ProportionCV(ViewOut(current_tab), 62), 6);
 
         // Change indicator, if necessary
         if (OC::CORE::ticks - last_change_ticks < 20000) {
             gfxPrint(15, 43, last_ms_value);
             gfxPrint("ms");
         }
+    }
+
+    void DrawSettings() {
+        switch (current_settings_page[current_tab]) {
+            case 0:
+                gfxPrint(69, 24, "DIRECTION");
+                gfxPrint(69, 32, op_names[operation[current_tab]]);
+                gfxPrint(69, 47, "CV IN");
+                gfxPrint(69, 55, mod_dest_names[mod_dest[current_tab]]);
+                break;
+            case 1:
+                gfxPrint(69, 24, "ATTACK");
+                gfxPrint(69, 32, op_names[operation[current_tab]]);
+                gfxPrint(69, 47, "DECAY");
+                gfxPrint(69, 55, mod_dest_names[mod_dest[current_tab]]);
+                break;
+        }
+
+        gfxCursor(69, 40 + (opt_cursor[current_tab] * 23), 58);
     }
 };
 
@@ -183,13 +259,14 @@ private:
 ///  should prefer to handle things in the HemisphereApplet child class
 ///  above.
 ////////////////////////////////////////////////////////////////////////////////
-ADEG ADEG_instance[2];
+ADEG ADEG_instance;
 
-void ADEG_Start(bool hemisphere) {ADEG_instance[hemisphere].BaseStart(hemisphere);}
-void ADEG_Controller(bool hemisphere, bool forwarding) {ADEG_instance[hemisphere].BaseController(forwarding);}
-void ADEG_View(bool hemisphere) {ADEG_instance[hemisphere].BaseView();}
-void ADEG_OnButtonPress(bool hemisphere) {ADEG_instance[hemisphere].OnButtonPress();}
-void ADEG_OnEncoderMove(bool hemisphere, int direction) {ADEG_instance[hemisphere].OnEncoderMove(direction);}
-void ADEG_ToggleHelpScreen(bool hemisphere) {ADEG_instance[hemisphere].HelpScreen();}
-uint32_t ADEG_OnDataRequest(bool hemisphere) {return ADEG_instance[hemisphere].OnDataRequest();}
-void ADEG_OnDataReceive(bool hemisphere, uint32_t data) {ADEG_instance[hemisphere].OnDataReceive(data);}
+void ADEG_Start(bool hemisphere) {ADEG_instance.BaseStart(hemisphere, HEM_ADEG_AVAILABLE_TABS);}
+void ADEG_Controller(bool hemisphere, bool forwarding) {ADEG_instance.BaseController(forwarding);}
+void ADEG_View(bool hemisphere) {ADEG_instance.BaseView();}
+void ADEG_OnButtonPress(bool button) {ADEG_instance.OnButtonPress(button);}
+void ADEG_OnEncoderMove(bool encoder, int direction) {ADEG_instance.OnEncoderMove(encoder, direction);}
+void ADEG_ToggleHelpScreen(bool hemisphere) {ADEG_instance.HelpScreen();}
+uint32_t ADEG_OnDataRequest(bool hemisphere) {return ADEG_instance.OnDataRequest();}
+void ADEG_OnDataReceive(bool hemisphere, uint32_t data) {ADEG_instance.OnDataReceive(data);}
+void ADEG_OnRightButtonPress() {ADEG_instance.BaseRightButtonPress();}
